@@ -10,6 +10,7 @@ import org.springframework.context.annotation.Bean;
 /**
  * Main Spring Application.
  * This is a comment added for the feature branch
+ * Second comment
  */
 @SpringBootApplication
 @EnableCaching
