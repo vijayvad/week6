@@ -1,93 +1,143 @@
-pipeline {
-     agent any
-     triggers {
-          pollSCM('* * * * *')
+podTemplate(yaml: '''
+    apiVersion: v1
+    kind: Pod
+    spec:
+      containers:
+      - name: gradle
+        image: gradle:6.3-jdk14
+        command:
+        - sleep
+        args:
+        - 99d
+        volumeMounts:
+        - name: shared-storage
+          mountPath: /mnt        
+      - name: kaniko
+        image: gcr.io/kaniko-project/executor:debug
+        command:
+        - sleep
+        args:
+        - 9999999
+        volumeMounts:
+        - name: shared-storage
+          mountPath: /mnt
+        - name: kaniko-secret
+          mountPath: /kaniko/.docker
+      restartPolicy: Never
+      volumes:
+      - name: shared-storage
+        persistentVolumeClaim:
+          claimName: jenkins-pv-claim
+      - name: kaniko-secret
+        secret:
+            secretName: dockercred
+            items:
+            - key: .dockerconfigjson
+              path: config.json
+''') {
+  node(POD_LABEL) {
+    try
+	{
+     stage('Build a gradle project') {
+	  git branch: 'main', url: 'https://github.com/vijayvad/week6.git'
+      container('gradle') {
+        stage('Build a gradle project') {
+          sh '''
+          chmod +x gradlew
+          ./gradlew build
+          mv ./build/libs/calculator-0.0.1-SNAPSHOT.jar /mnt
+          '''
+        }
+
+        stage('Unit Test') {
+		if (env.BRANCH_NAME == 'feature' || env.BRANCH_NAME == 'main')
+		 {
+          echo "Unit Test for branch : ${env.BRANCH_NAME}"
+		  sh '''
+          ./gradlew test
+          '''
+		 }
+		else
+		 {
+		  echo "Unit Test Skipped for branch : ${env.BRANCH_NAME}"
+		  }
+        }
+		stage('Code Coverage') {
+		if (env.BRANCH_NAME == 'main')
+		 {
+          echo 'Code Coverage for branch : ${env.BRANCH_NAME}'
+		  sh '''
+          ./gradlew jacocoTestCoverageVerification
+          ./gradlew jacocoTestReport
+          '''
+		 }
+		 else
+		 {
+		  echo "Code Coverage Skipped for branch : ${env.BRANCH_NAME}"
+		 }
+		
+        }
+		stage('Static code analysis') {
+		if (env.BRANCH_NAME == 'feature' || env.BRANCH_NAME == 'master')
+		 {
+          echo "Static code analysis for branch : ${env.BRANCH_NAME}"
+		  sh '''
+          ./gradlew checkstyleMain
+          ./gradlew jacocoTestReport
+          '''
+		 }
+		 else
+		 {
+		  echo "Static code analysis Skipped for branch : ${env.BRANCH_NAME}"
+		 }
+		
+       }
+      }
+	 }
+	  try
+	  {
+	   stage('Build Java Image') {
+       container('kaniko') {
+        stage('Build Image and Push to Docker Repository') {
+         if (env.BRANCH_NAME == 'feature')
+         { 
+		     sh '''
+                echo 'FROM openjdk:8-jre' > Dockerfile
+                echo 'COPY ./calculator-0.0.1-SNAPSHOT.jar app.jar' >> Dockerfile
+                echo 'ENTRYPOINT ["java", "-jar", "app.jar"]' >> Dockerfile
+                mv /mnt/calculator-0.0.1-SNAPSHOT.jar .
+                /kaniko/executor --context `pwd` --destination vijayvad/calculator-feature:0.1
+                '''
+         }
+         else if (env.BRANCH_NAME == 'master')
+         {
+          sh '''
+                echo 'FROM openjdk:8-jre' > Dockerfile
+                echo 'COPY ./calculator-0.0.1-SNAPSHOT.jar app.jar' >> Dockerfile
+                echo 'ENTRYPOINT ["java", "-jar", "app.jar"]' >> Dockerfile
+                mv /mnt/calculator-0.0.1-SNAPSHOT.jar .
+                /kaniko/executor --context `pwd` --destination vijayvad/calculator:1.0
+                '''
+         }
+         else
+         {
+          echo "Skipping Java Image Build and Push"
+         }
+		  }
      }
-     stages {
-          stage("Compile") {
-               steps {
-                    sh "./gradlew compileJava"
-               }
-          }
-          stage("Unit test") {
-               steps {
-                    sh "./gradlew test"
-               }
-          }
-          stage("Code coverage") {
-              when { 
-                   branch "main" 
-              }
-               steps {
-                    sh "./gradlew jacocoTestReport"
-                    sh "./gradlew jacocoTestCoverageVerification"
-               }
-          }
-          stage("Static code analysis") {
-               steps {
-                    sh "./gradlew checkstyleMain"
-               }
-          }
-          stage("Package") {
-               steps {
-                    sh "./gradlew build"
-               }
-          }
+    }
+	 }
+	 catch (Exception E) 
+	 {
+		echo 'Failed while building '
+	 }
+	 
+	}
+	catch (Exception E) 
+	{
+		echo 'Failed while building'
+	}
 
-          stage("Docker build") {
-               steps {
-                    sh "docker build -t leszko/calculator:${BUILD_TIMESTAMP} ."
-               }
-          }
-
-          stage("Docker login") {
-               steps {
-                    withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId: 'docker-hub-credentials',
-                               usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
-                         sh "docker login --username $USERNAME --password $PASSWORD"
-                    }
-               }
-          }
-
-          stage("Docker push") {
-               steps {
-                    sh "docker push leszko/calculator:${BUILD_TIMESTAMP}"
-               }
-          }
-
-          stage("Update version") {
-               steps {
-                    sh "sed  -i 's/{{VERSION}}/${BUILD_TIMESTAMP}/g' calculator.yaml"
-               }
-          }
-          
-          stage("Deploy to staging") {
-               steps {
-                    sh "kubectl config use-context staging"
-                    sh "kubectl apply -f hazelcast.yaml"
-                    sh "kubectl apply -f calculator.yaml"
-               }
-          }
-
-          stage("Acceptance test") {
-               steps {
-                    sleep 60
-                    sh "chmod +x acceptance-test.sh && ./acceptance-test.sh"
-               }
-          }
-
-          stage("Release") {
-               steps {
-                    sh "kubectl config use-context production"
-                    sh "kubectl apply -f hazelcast.yaml"
-                    sh "kubectl apply -f calculator.yaml"
-               }
-          }
-          stage("Smoke test") {
-              steps {
-                  sleep 60
-                  sh "chmod +x smoke-test.sh && ./smoke-test.sh"
-              }
-          }
-     }
+    
+  }
 }
