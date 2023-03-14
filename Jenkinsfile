@@ -37,7 +37,7 @@ podTemplate(yaml: '''
 ''') {
   node(POD_LABEL) {
     stage('Run pipeline against a gradle project') {
-        git branch: 'master', url: 'https://github.com/vijayvad/week6'
+        git branch: 'main', url: 'https://github.com/vijayvad/week6'
         container('gradle') {
             try {
               if(env.BRANCH_NAME != "playground") {
