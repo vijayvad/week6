@@ -106,7 +106,7 @@ podTemplate(yaml: '''
                 echo 'COPY ./calculator-0.0.1-SNAPSHOT.jar app.jar' >> Dockerfile
                 echo 'ENTRYPOINT ["java", "-jar", "app.jar"]' >> Dockerfile
                 mv /mnt/calculator-0.0.1-SNAPSHOT.jar .
-                /kaniko/executor --context `pwd` --destination vijayvad/dev_ops/calculator-feature:0.1
+                /kaniko/executor --context `pwd` --destination vijayvad/calculator-feature:0.1
                 '''
          }
          else if (env.BRANCH_NAME == 'master')
@@ -116,7 +116,7 @@ podTemplate(yaml: '''
                 echo 'COPY ./calculator-0.0.1-SNAPSHOT.jar app.jar' >> Dockerfile
                 echo 'ENTRYPOINT ["java", "-jar", "app.jar"]' >> Dockerfile
                 mv /mnt/calculator-0.0.1-SNAPSHOT.jar .
-                /kaniko/executor --context `pwd` --destination vijayvad/dev_ops/calculator:1.0
+                /kaniko/executor --context `pwd` --destination vijayvad/calculator:1.0
                 '''
          }
          else
